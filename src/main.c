@@ -5,11 +5,63 @@
 #include "matrix.h"
 
 
+/// Activation Functions
+
+
 f32
 sigmoid (f32 x)
 {
   return 1.0f / (1.0f + expf (-x));
 }
+
+
+f32
+dsigmoid (f32 a)
+{
+  return a * (1.0f - a);
+}
+
+
+f32
+identity (f32 x)
+{
+  return x;
+}
+
+
+f32
+didentity (f32 a)
+{
+  UNUSED (a);
+  return 1.0f;
+}
+
+
+f32
+relu (f32 x)
+{
+  return x > 0.0f ? x : 0.0f;
+}
+
+
+f32
+drelu (f32 a)
+{
+  return a > 0.0f ? 1.0f : 0.0f;
+}
+
+
+/// Neural Network
+
+
+struct af
+{
+  f32 (*f) (f32);
+  f32 (*df) (f32);
+};
+
+
+#define af_make(f, df) (struct af){ f, df }
 
 
 struct nn
@@ -29,6 +81,8 @@ struct nn
   matrix *delta;
   matrix *delta_f;
   matrix *delta_a;
+
+  struct af *afs;
 
   usize L;
   usize K;
@@ -59,6 +113,8 @@ nn_create (int *S, struct nn *nn, usize *layers, usize L)
   nn->delta_f = allocate0_n (S, nn->K, sizeof (matrix));
   nn->delta_a = allocate0_n (S, nn->K, sizeof (matrix));
 
+  nn->afs = allocate0_n (S, nn->K, sizeof (struct af));
+
   if (SERROR (S))
     goto clean_nn;
 
@@ -86,6 +142,9 @@ nn_create (int *S, struct nn *nn, usize *layers, usize L)
       if (SERROR (S))
         goto clean_nn;
     }
+
+  for (usize k = 0; k < nn->K; ++k)
+    nn->afs[k] = af_make (sigmoid, dsigmoid);
 
   return;
 
@@ -130,6 +189,8 @@ clean_nn:
   deallocate (nn->delta);
   deallocate (nn->delta_f);
   deallocate (nn->delta_a);
+
+  deallocate (nn->afs);
 }
 
 
@@ -160,6 +221,8 @@ nn_destroy (struct nn *nn)
   deallocate (nn->delta);
   deallocate (nn->delta_f);
   deallocate (nn->delta_a);
+
+  deallocate (nn->afs);
 }
 
 
@@ -242,7 +305,7 @@ nn_forward (struct nn nn, matrix x)
       matrix_add (nn.as[l], nn.as[l], nn.bs[k]);
 
       // a = f z
-      matrix_map (nn.as[l], nn.as[l], sigmoid);
+      matrix_map (nn.as[l], nn.as[l], nn.afs[k].f);
     }
 
   return *nn_output (nn);
@@ -278,9 +341,8 @@ nn_backward (struct nn nn, matrix ti, matrix to)
       matrix_sub  (nn.delta[nn.K - 1], y_hat,              y);
       matrix_muls (nn.delta[nn.K - 1], nn.delta[nn.K - 1], 2.0f);
 
-      // (ACTIVATION FUNCTION) = ŷ(1 - ŷ) = σ'
-      matrix_subs_l (nn.delta_f[nn.K - 1], 1.0f,                 y_hat);
-      matrix_mul    (nn.delta_f[nn.K - 1], nn.delta_f[nn.K - 1], y_hat);
+      // (ACTIVATION FUNCTION)
+      matrix_map (nn.delta_f[nn.K - 1], y_hat, nn.afs[nn.K - 1].df);
 
       // delta_{L} = 2(ŷ - y) * (ACTIVATION FUNCTION)
       matrix_mul (nn.delta[nn.K - 1], nn.delta[nn.K - 1], nn.delta_f[nn.K - 1]);
@@ -294,12 +356,11 @@ nn_backward (struct nn nn, matrix ti, matrix to)
               // (W_{l+1})^T @ delta_{l+1}
               matrix_transpose_dot_l (nn.delta[k], nn.ws[k + 1], nn.delta[k + 1]);
 
-              // (ACTIVATION FUNCTION) = a_{l}(1 - a_{l}) = σ'
-              matrix_subs_l (nn.delta_f[k], 1.0f,          nn.as[l]);
-              matrix_mul    (nn.delta_f[k], nn.delta_f[k], nn.as[l]);
+              // (ACTIVATION FUNCTION)
+              matrix_map (nn.delta_f[k], nn.as[l], nn.afs[k].df);
 
               // delta_{l} = (w_{l+1})^T @ delta_{l+1} * (ACTIVATION FUNCTION)
-              matrix_mul (nn.delta[k], nn.delta[k],  nn.delta_f[k]);
+              matrix_mul (nn.delta[k], nn.delta[k], nn.delta_f[k]);
             }
 
           matrix_transpose_dot_r (nn.delta_a[k], nn.delta[k], nn.as[l - 1]);
@@ -373,30 +434,31 @@ main (void)
   /// CONFIG
   srand (time (0));
 
-#define LAYERS 2, 2, 1
+#define LAYERS 1, 1
 
 #define EPOCHS (35 * 1000)
-#define LEARNR (1.0)
+#define LEARNR (0.01)
 
   matrix ti;
   matrix to;
 
-  matrix_create (NULL, &ti, 2, 4);
-  matrix_create (NULL, &to, 1, 4);
+  matrix_create (NULL, &ti, 1, 5);
+  matrix_create (NULL, &to, 1, 5);
 
   matrix_fill_with (ti, (f32[]){
-    0, 1, 0, 1,
-    0, 0, 1, 1,
+    0, 1, 2, 3, 4,
   });
 
   matrix_fill_with (to, (f32[]){
-    0, 1, 1, 0,
+    0, 2, 4, 6, 8,
   });
 
   /// Neural Network
   struct nn nn;
 
   nn_create (NULL, &nn, NN_LAYERS (LAYERS));
+
+  nn.afs[nn.K - 1] = af_make (identity, didentity);
 
   nn_fill_random (nn, -1, 1);
 

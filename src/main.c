@@ -51,6 +51,16 @@ drelu (f32 a)
 }
 
 
+// NOTE: tanhf already exists
+
+
+f32
+dtanh (f32 a)
+{
+  return 1.0f - a * a;
+}
+
+
 /// Neural Network
 
 
@@ -94,7 +104,7 @@ struct nn
 
 
 void
-nn_create (int *S, struct nn *nn, usize *layers, usize L)
+nn_create (int *S, struct nn *nn, usize *layers, usize L, struct af af_default)
 {
   panic_assert (L >= 2);
 
@@ -144,7 +154,7 @@ nn_create (int *S, struct nn *nn, usize *layers, usize L)
     }
 
   for (usize k = 0; k < nn->K; ++k)
-    nn->afs[k] = af_make (sigmoid, dsigmoid);
+    nn->afs[k] = af_default;
 
   return;
 
@@ -434,9 +444,9 @@ main (void)
   /// CONFIG
   srand (time (0));
 
-#define LAYERS 1, 1
+#define LAYERS 1, 8, 1
 
-#define EPOCHS (35 * 1000)
+#define EPOCHS (350 * 1000)
 #define LEARNR (0.01)
 
   matrix ti;
@@ -446,17 +456,17 @@ main (void)
   matrix_create (NULL, &to, 1, 5);
 
   matrix_fill_with (ti, (f32[]){
-    0, 1, 2, 3, 4,
+    0, 1, 2, 3, 4, 5
   });
 
   matrix_fill_with (to, (f32[]){
-    0, 2, 4, 6, 8,
+    0, 1, 4, 9, 16, 25
   });
 
   /// Neural Network
   struct nn nn;
 
-  nn_create (NULL, &nn, NN_LAYERS (LAYERS));
+  nn_create (NULL, &nn, NN_LAYERS (LAYERS), af_make (tanhf, dtanh));
 
   nn.afs[nn.K - 1] = af_make (identity, didentity);
 
